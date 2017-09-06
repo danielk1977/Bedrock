@@ -104,7 +104,7 @@ sqlite3* openDatabase() {
     return db;
 }
 
-void test(int threadCount, const string& testQuery) {
+void test(int threadCount, const string& testQuery, int bConstant) {
     // Open a separate database handle for each thread
     cout << "Testing with " << threadCount << " threads: ";
     vector<sqlite3*> dbs(threadCount);
@@ -114,7 +114,10 @@ void test(int threadCount, const string& testQuery) {
 
     // We want to do the same number of total queries each test, but split between however
     // many threads we have
-    int numQueries = global_numQueries / threadCount; 
+    int numQueries = global_numQueries;
+    if( bConstant==0 ){
+      numQueries = numQueries / threadCount; 
+    }
 
     // Run the actual test
     auto start = STimeNow();
@@ -150,6 +153,7 @@ int main(int argc, char *argv[]) {
     int maxNumThreads = 16;
     int showStats = 0;
     int iStep = 0;
+    int bConstant = 0;
     const char* customQuery = 0;
     for (int i = 1; i < argc; i++) {
         char *z = argv[i];
@@ -174,6 +178,9 @@ int main(int argc, char *argv[]) {
         }else
         if (z == string("-stepThreads")) {
           iStep = atoi(argv[++i]);
+        }else
+        if (z == string("-constant-time")) {
+          bConstant = 1;
         }else
         if (z == string("-dbFilename")) {
           global_dbFilename = argv[++i];
@@ -221,7 +228,7 @@ int main(int argc, char *argv[]) {
       // Ramp up to the test desired test size
       int threads = 1;
       while (threads <= maxNumThreads) {
-        test(threads, testQuery);
+        test(threads, testQuery, bConstant);
         if( iStep ){
           threads += iStep;
         }else{
@@ -233,10 +240,10 @@ int main(int argc, char *argv[]) {
       if( iStep==0 ){
         while (threads >= 2) {
           threads /= 2;
-          test(threads, testQuery);
+          test(threads, testQuery, bConstant);
         }
       }
     }else{
-      test(numThreads, testQuery);
+      test(numThreads, testQuery, bConstant);
     }
 }
