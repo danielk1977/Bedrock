@@ -149,6 +149,7 @@ int main(int argc, char *argv[]) {
     int numThreads = -1;
     int maxNumThreads = 16;
     int showStats = 0;
+    int iStep = 0;
     const char* customQuery = 0;
     for (int i = 1; i < argc; i++) {
         char *z = argv[i];
@@ -170,6 +171,9 @@ int main(int argc, char *argv[]) {
         }else
         if (z == string("-mmap")) {
           global_bMmap = 1;
+        }else
+        if (z == string("-stepThreads")) {
+          iStep = atoi(argv[++i]);
         }else
         if (z == string("-dbFilename")) {
           global_dbFilename = argv[++i];
@@ -218,13 +222,19 @@ int main(int argc, char *argv[]) {
       int threads = 1;
       while (threads <= maxNumThreads) {
         test(threads, testQuery);
-        threads *= 2;
+        if( iStep ){
+          threads += iStep;
+        }else{
+          threads *= 2;
+        }
       }
 
       // Now ramp back down to the original to make sure it matches the first timings
-      while (threads >= 2) {
-        threads /= 2;
-        test(threads, testQuery);
+      if( iStep==0 ){
+        while (threads >= 2) {
+          threads /= 2;
+          test(threads, testQuery);
+        }
       }
     }else{
       test(numThreads, testQuery);
