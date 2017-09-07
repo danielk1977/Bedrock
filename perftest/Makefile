@@ -10,7 +10,7 @@ perftest.o: perftest.cpp
 	g++ $(CFLAGS) -std=c++11 -c perftest.cpp;
 
 perftest: sqlite3.o perftest.o
-	g++ $(CFLAGS) -std=c++11 -o perftest perftest.o sqlite3.o -ldl -lpthread;
+	g++ $(CFLAGS) -std=c++11 -o perftest perftest.o sqlite3.o -ldl -lpthread -lnuma
 
 clean:
 	rm -f perftest.o
