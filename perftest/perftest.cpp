@@ -102,32 +102,40 @@ void runTestQueries(sqlite3* db, int threadNum, int numQueries, const string& te
 }
 
 sqlite3* openDatabase(int threadNum) {
-    // If we're numa aware, spread the memory across all nodes
-    if (global_numa) {
-        numa_set_preferred(threadNum%numa_num_task_nodes());
-    }
+  const int f = SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX;
+  const char *zVfs = "unix-none";
 
-    // Open it per the global settings
-    sqlite3* db = 0;
-    if (SQLITE_OK != sqlite3_open_v2(global_dbFilename, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, "unix-none")) {
-        cout << "Error: Can't open '" << global_dbFilename << "'." << endl;
-        exit(1);
-    }
-    sqlite3_exec(db, "PRAGMA locking_mode=EXCLUSIVE;", 0, 0, 0);
-    sqlite3_exec(db, "PRAGMA legacy_file_format = OFF;", 0, 0, 0);
-    sqlite3_exec(db, "PRAGMA journal_mode = WAL;", 0, 0, 0);
-    sqlite3_exec(db, "PRAGMA synchronous = OFF;", 0, 0, 0);
-    sqlite3_exec(db, "PRAGMA count_changes = OFF;", 0, 0, 0);
-    char *zSql = sqlite3_mprintf("PRAGMA cache_size(%d)", global_cacheSize);
-    sqlite3_exec(db, zSql, 0, 0, 0);
-    sqlite3_free(zSql);
-    sqlite3_wal_autocheckpoint(db, 10000);
-    if( global_bMmap ){
-      sqlite3_exec(db, "PRAGMA mmap_size = 1099511627776;", 0, 0, 0); // 1TB
-    } else {
-      sqlite3_exec(db, "PRAGMA mmap_size = 0;", 0, 0, 0); // Disable
-    }
-    return db;
+  sqlite3* db = 0;
+
+  // If we're numa aware, spread the memory across all nodes
+  if (global_numa) {
+    numa_set_preferred(threadNum%numa_num_task_nodes());
+  }
+
+  // Open it per the global settings
+  char *zDb = sqlite3_mprintf(global_dbFilename, threadNum);
+  if (SQLITE_OK != sqlite3_open_v2(zDb, &db, f, zVfs) ){
+    cout << "Error: Can't open '" << zDb << "'." << endl;
+    exit(1);
+  }
+  sqlite3_free(zDb);
+
+  sqlite3_exec(db, "PRAGMA locking_mode=EXCLUSIVE;", 0, 0, 0);
+  sqlite3_exec(db, "PRAGMA legacy_file_format = OFF;", 0, 0, 0);
+  sqlite3_exec(db, "PRAGMA journal_mode = WAL;", 0, 0, 0);
+  sqlite3_exec(db, "PRAGMA synchronous = OFF;", 0, 0, 0);
+  sqlite3_exec(db, "PRAGMA count_changes = OFF;", 0, 0, 0);
+
+  char *zSql = sqlite3_mprintf("PRAGMA cache_size(%d)", global_cacheSize);
+  sqlite3_exec(db, zSql, 0, 0, 0);
+  sqlite3_free(zSql);
+  sqlite3_wal_autocheckpoint(db, 10000);
+  if( global_bMmap ){
+    sqlite3_exec(db, "PRAGMA mmap_size = 1099511627776;", 0, 0, 0); // 1TB
+  } else {
+    sqlite3_exec(db, "PRAGMA mmap_size = 0;", 0, 0, 0); // Disable
+  }
+  return db;
 }
 
 void test(int threadCount, const string& testQuery, int bConstant) {
