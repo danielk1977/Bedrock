@@ -9,6 +9,8 @@
 #include <random>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
+#include <string.h>
 using namespace std;
 
 // Overall test settings
@@ -149,48 +151,94 @@ int main(int argc, char *argv[]) {
     sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
 
     // Process the command line
-    int numThreads = -1;
     int maxNumThreads = 16;
+    int minNumThreads = 1;
+    int stepThreads = 0;
+
     int showStats = 0;
-    int iStep = 0;
     int bConstant = 0;
     const char* customQuery = 0;
+
+    struct Opt {
+      int id;                     /* Value used for option in "switch" below */
+      const char *z;              /* Text of option */
+      int bArg;                   /* True if option requires argument */
+    } aOpt[] = {
+      {1,  "-numQueries",    1},
+      {2,  "-cacheSize",     1},
+      {4,  "-querySize",     1},
+      {5,  "-maxNumThreads", 1},
+      {6,  "-mmap",          0},
+      {7,  "-stepThreads",   1},
+      {8,  "-constantTime",  0},
+      {9,  "-dbFileName",    1},
+      {10, "-customQuery",   1},
+      {11, "-minThreads",    1},
+    };
     for (int i = 1; i < argc; i++) {
         char *z = argv[i];
+        int n;
+        int ii;
+        int iOpt = -1;
+
         if( z[0]=='-' && z[1]=='-' ) z++;
-        if (z == string("-numQueries")) {
-            global_numQueries = atoi(argv[++i]);
-        }else
-        if (z == string("-cacheSize")) {
-            global_cacheSize = atoi(argv[++i]);
-        }else
-        if (z == string("-numThreads")) {
-            numThreads = atoi(argv[++i]);
-        }else
-        if (z == string("-querySize")) {
-            global_querySize = atoi(argv[++i]);
-        }else
-        if (z == string("-maxNumThreads")) {
-            maxNumThreads = atoi(argv[++i]);
-        }else
-        if (z == string("-mmap")) {
-          global_bMmap = 1;
-        }else
-        if (z == string("-stepThreads")) {
-          iStep = atoi(argv[++i]);
-        }else
-        if (z == string("-constant-time")) {
-          bConstant = 1;
-        }else
-        if (z == string("-dbFilename")) {
-          global_dbFilename = argv[++i];
-        } else
-        if (z == string("-customQuery")) {
-          customQuery = argv[++i];
-        } else
-        {
-            cerr << "unknown option: " << argv[i] << "\n";
-            exit(1);
+        n = strlen(z);
+        for(ii=0; ii<sizeof(aOpt)/sizeof(struct Opt); ii++){
+          struct Opt *p = &aOpt[ii];
+          if( strlen(p->z)>=n && sqlite3_strnicmp(z, p->z, n)==0 ){
+            if( iOpt>=0 ){
+              cerr << "ambiguous option: " << z << endl;
+              return -1;
+            }
+            iOpt = ii;
+          }
+        }
+        if( iOpt<0 ){
+          cerr << "unknown option: " << z << endl;
+          return -1;
+        }
+        if( aOpt[iOpt].bArg ){
+          if( i==(argc-1) ){
+            cerr << "option requires an argument: " << z << endl;
+            return -1;
+          }
+          i++;
+        }
+        switch( aOpt[iOpt].id ){
+          case 1: assert( 0==sqlite3_strnicmp("-numQueries", z, n) );
+            global_numQueries = atoi(argv[i]);
+            break;
+          case 2: assert( 0==sqlite3_strnicmp("-cacheSize", z, n) );
+            global_cacheSize = atoi(argv[i]);
+            break;
+          case 4: assert( 0==sqlite3_strnicmp("-querySize", z, n) );
+            global_querySize = atoi(argv[i]);
+            break;
+          case 5: assert( 0==sqlite3_strnicmp("-maxNumThreads", z, n) );
+            maxNumThreads = atoi(argv[i]);
+            break;
+          case 6: assert( 0==sqlite3_strnicmp("-mmap", z, n) );
+            global_bMmap = 1;
+            break;
+          case 7: assert( 0==sqlite3_strnicmp("-stepThreads", z, n) );
+            stepThreads = atoi(argv[i]);
+            break;
+          case 8: assert( 0==sqlite3_strnicmp("-constantTime", z, n) );
+            bConstant = 1;
+            break;
+          case 9: assert( 0==sqlite3_strnicmp("-dbFileName", z, n) );
+            global_dbFilename = argv[i];
+            break;
+          case 10: assert( 0==sqlite3_strnicmp("-customQuery", z, n) );
+            customQuery = argv[i];
+            break;
+          case 11: assert( 0==sqlite3_strnicmp("-minThreads", z, n) );
+            minNumThreads = atoi(argv[i]);
+            if( minNumThreads<=0 ){
+              cerr << "Bad value for -minThreads: " << minNumThreads << endl;
+              return -1;
+            }
+            break;
         }
     }
 
@@ -223,27 +271,25 @@ int main(int argc, char *argv[]) {
     }
     cout << "Testing: " << testQuery << endl;
 
-    // Run the test for however many configurations were requested
-    if( numThreads<0 ){
-      // Ramp up to the test desired test size
-      int threads = 1;
-      while (threads <= maxNumThreads) {
-        test(threads, testQuery, bConstant);
-        if( iStep ){
-          threads += iStep;
-        }else{
-          threads *= 2;
-        }
-      }
-
-      // Now ramp back down to the original to make sure it matches the first timings
-      if( iStep==0 ){
-        while (threads >= 2) {
-          threads /= 2;
-          test(threads, testQuery, bConstant);
-        }
+    // Run the tests. If the user specified a -stepThreads option, run
+    // the test once for each number of threads between minNumThreads and
+    // maxNumThreads, inclusive. Or, if no -stepThreads option was specified,
+    // run the test once with minNumThreads, then once with twice that many,
+    // and so on until maxNumThreads is reached. Then run the same tests
+    // again, but in the opposite order.
+    //
+    if( stepThreads ){
+      for(int t=minNumThreads; t<=maxNumThreads; t+=stepThreads){
+        test(t, testQuery, bConstant);
       }
     }else{
-      test(numThreads, testQuery, bConstant);
+      for(int t=minNumThreads; t<=maxNumThreads; t=t*2){
+        test(t, testQuery, bConstant);
+      }
+      for(int t=maxNumThreads; t>=minNumThreads; t=t/2){
+        test(t, testQuery, bConstant);
+      }
     }
+
+    return 0;
 }
