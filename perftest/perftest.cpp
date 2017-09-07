@@ -9,6 +9,7 @@
 #include <random>
 #include <sys/time.h>
 #include <unistd.h>
+#include <numa.h>
 using namespace std;
 
 // Overall test settings
@@ -17,6 +18,8 @@ static int global_bMmap = 0;
 static const char* global_dbFilename = "test.db";
 static int global_cacheSize = -1000000;
 static int global_querySize = 10;
+static int global_numa = 0;
+static int64_t global_noopResult = 0;
 
 // Data about the database
 static uint64_t global_dbRows = 0;
@@ -62,25 +65,46 @@ int queryCallback(void* data, int columns, char** columnText, char** columnName)
 }
 
 // This runs a test query some number of times, optionally showing progress
-void runTestQueries(sqlite3* db, int numQueries, const string& testQuery, bool showProgress) {
+void runTestQueries(sqlite3* db, int threadNum, int numQueries, const string& testQuery, bool showProgress) {
+    // If we're numa aware, spread the memory across all nodes
+    if (global_numa) {
+        numa_run_on_node(threadNum%numa_num_task_nodes());
+        numa_set_preferred(threadNum%numa_num_task_nodes());
+    }
+
     // Run however many queries are requested
     for (int q=0; q<numQueries; q++) {
-        // Run the query
-        list<vector<string>> results;
-        int error = sqlite3_exec(db, testQuery.c_str(), queryCallback, &results, 0);
-        if (error != SQLITE_OK) {
-            cout << "Error running test query: " << sqlite3_errmsg(db) << ", query: " << testQuery << endl;
+        // See if it's a special query
+        if (testQuery=="SLEEP") {
+            // Waits 10ms
+            usleep(10*1000);
+        } else if (testQuery=="NOOP") {
+            // Does a simple calculation
+            int c=1000000;
+            while(c--) { global_noopResult+=c; }
+        } else {
+            // Run the query
+            list<vector<string>> results;
+            int error = sqlite3_exec(db, testQuery.c_str(), queryCallback, &results, 0);
+            if (error != SQLITE_OK) {
+                cout << "Error running test query: " << sqlite3_errmsg(db) << ", query: " << testQuery << endl;
+            }
         }
 
         // Optionally show progress
-        if (showProgress && (q % (numQueries/10))==0 ) {
+        if (showProgress && numQueries>10 && (q % (numQueries/10))==0 ) {
             int percent = (int)(((double)q / (double)numQueries) * 100.0);
             cout << percent << "% " << flush;
         }
     }
 }
 
-sqlite3* openDatabase() {
+sqlite3* openDatabase(int threadNum) {
+    // If we're numa aware, spread the memory across all nodes
+    if (global_numa) {
+        numa_set_preferred(threadNum%numa_num_task_nodes());
+    }
+
     // Open it per the global settings
     sqlite3* db = 0;
     if (SQLITE_OK != sqlite3_open_v2(global_dbFilename, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, "unix-none")) {
@@ -109,7 +133,7 @@ void test(int threadCount, const string& testQuery) {
     cout << "Testing with " << threadCount << " threads: ";
     vector<sqlite3*> dbs(threadCount);
     for (int i = 0; i < threadCount; i++) {
-        dbs[i] = openDatabase();
+        dbs[i] = openDatabase(i);
     }
 
     // We want to do the same number of total queries each test, but split between however
@@ -121,7 +145,7 @@ void test(int threadCount, const string& testQuery) {
     list <thread> threads;
     for (int i = 0; i < threadCount; i++) {
         bool showProgress = (i == (threadCount - 1)); // Only show progress on the last thread
-        threads.emplace_back(runTestQueries, dbs[i], numQueries, testQuery, showProgress);
+        threads.emplace_back(runTestQueries, dbs[i], i, numQueries, testQuery, showProgress);
     }
     for (auto& t : threads) {
         t.join();
@@ -177,6 +201,17 @@ int main(int argc, char *argv[]) {
         if (z == string("-customQuery")) {
           customQuery = argv[++i];
         } else
+        if (z == string("-numa")) {
+            // Output numa information about this system
+            global_numa = 1;
+            cout << "Enabling NUMA awareness:" << endl;
+            cout << "numa_available=" << numa_available() << endl;
+            cout << "numa_max_node=" << numa_max_node() << endl;
+            cout << "numa_pagesize=" << numa_pagesize() << endl;
+            cout << "numa_num_configured_cpus=" << numa_num_configured_cpus() << endl;
+            cout << "numa_num_task_cpus=" << numa_num_task_cpus() << endl;
+            cout << "numa_num_task_nodes=" << numa_num_task_nodes() << endl;
+        } else
         {
             cerr << "unknown option: " << argv[i] << "\n";
             exit(1);
@@ -185,7 +220,7 @@ int main(int argc, char *argv[]) {
 
     // Inspect the existing database with a full table scan, pulling it all into memory
     cout << "Precaching '" << global_dbFilename << "'...";
-    sqlite3* db = openDatabase();
+    sqlite3* db = openDatabase(0);
     string query = "SELECT COUNT(*), MIN(nonIndexedColumn) FROM perfTest;";
     list<vector<string>> results;
     auto start = STimeNow();
@@ -228,5 +263,10 @@ int main(int argc, char *argv[]) {
       }
     }else{
       test(numThreads, testQuery);
+    }
+
+    // Output the NOOP number, if availble, so compiler doesn't throw it out
+    if (global_noopResult) {
+        cout << "NOOP=" << global_noopResult << endl;
     }
 }
