@@ -68,7 +68,14 @@ int queryCallback(void* data, int columns, char** columnText, char** columnName)
 }
 
 // This runs a test query some number of times, optionally showing progress
-void runTestQueries(sqlite3* db, int threadNum, int numQueries, const string& testQuery, bool showProgress) {
+void runTestQueries(
+  sqlite3* db,                    /* Database handle to use */
+  int threadNum,                  /* Id number for thread */
+  int numQueries,                 /* Number of times to execute testQuery */
+  const string& testQuery,        /* Query to execute */
+  bool showProgress,              /* True to output progress info via cout */
+  uint64_t *piFin                 /* Timestamp when thread exits */
+) {
     // If we're numa aware, spread the memory across all nodes
     if (global_numa) {
         numa_run_on_node(threadNum%numa_num_task_nodes());
@@ -100,6 +107,8 @@ void runTestQueries(sqlite3* db, int threadNum, int numQueries, const string& te
             cout << percent << "% " << flush;
         }
     }
+
+    *piFin = STimeNow();
 }
 
 sqlite3* openDatabase(int threadNum) {
@@ -144,6 +153,8 @@ sqlite3* openDatabase(int threadNum) {
 }
 
 void test(int threadCount, const string& testQuery, int bConstant) {
+    uint64_t *aEnd;               /* Array of end times */
+
     // Open a separate database handle for each thread
     cout << "Testing with " << threadCount << " threads: ";
     vector<sqlite3*> dbs(threadCount);
@@ -158,12 +169,15 @@ void test(int threadCount, const string& testQuery, int bConstant) {
       numQueries = numQueries / threadCount; 
     }
 
+    aEnd = (uint64_t*)sqlite3_malloc(sizeof(uint64_t) * threadCount);
+    memset(aEnd, 0, sizeof(uint64_t) * threadCount);
+
     // Run the actual test
     auto start = STimeNow();
     list <thread> threads;
     for (int i = 0; i < threadCount; i++) {
         bool showProgress = (i == (threadCount - 1)); // Only show progress on the last thread
-        threads.emplace_back(runTestQueries, dbs[i], i, numQueries, testQuery, showProgress);
+        threads.emplace_back(runTestQueries, dbs[i], i, numQueries, testQuery, showProgress, &aEnd[i]);
     }
     for (auto& t : threads) {
         t.join();
@@ -180,12 +194,26 @@ void test(int threadCount, const string& testQuery, int bConstant) {
     for (int i = 0; i < threadCount; i++) {
         sqlite3_close(dbs[i]);
     }
+
+    cout.precision(2);
+    for (int i = 0; i < threadCount; i++) {
+      double tm = (aEnd[i] - start) / 1000000.0;
+      cout << fixed << tm << " ";
+    }
+    cout << endl;
+
+    sqlite3_free(aEnd);
 }
 
 
 int main(int argc, char *argv[]) {
-    // Disable memory status tracking as this has a known concurrency problem
+    // Disable memory status tracking as this has a known concurrency 
+    // problem. And enable URI handling so that extra SQLite configuration 
+    // options may be passed through the -dbFileName switch in the form
+    // of URI query parameters.
+    //
     sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
+    sqlite3_config(SQLITE_CONFIG_URI, 1);
 
     // Process the command line
     int maxNumThreads = 16;
