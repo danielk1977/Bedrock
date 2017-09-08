@@ -187,9 +187,12 @@ void test(int threadCount, const string& testQuery, int bConstant) {
     auto end = STimeNow();
 
     // Output the results
+#if 0
     double vm, rss;
     getMemUsage(vm, rss);
     cout << "Done! (" << ((end - start) / 1000000.0) << " seconds, vm=" << vm << ", rss=" << rss << ")" << endl;
+#endif
+    cout << "! (";
 
     // Close all the database handles
     for (int i = 0; i < threadCount; i++) {
@@ -212,7 +215,7 @@ void test(int threadCount, const string& testQuery, int bConstant) {
 
     int i90 = threadCount*9/10;
     cout << i90 << "/" << threadCount << "=" << (aEnd[i90]-start)/1000000.0;
-    cout << endl << scientific;
+    cout << ")" << endl << scientific;
 
     sqlite3_free(aEnd);
 }
