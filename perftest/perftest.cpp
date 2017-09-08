@@ -25,6 +25,7 @@ static int64_t global_noopResult = 0;
 
 // Data about the database
 static uint64_t global_dbRows = 0;
+static int      global_bRollback = 0;       // True to use rollback mode.
 
 // Returns the current time down to the microsecond
 uint64_t STimeNow() {
@@ -122,7 +123,11 @@ sqlite3* openDatabase(int threadNum) {
 
   sqlite3_exec(db, "PRAGMA locking_mode=EXCLUSIVE;", 0, 0, 0);
   sqlite3_exec(db, "PRAGMA legacy_file_format = OFF;", 0, 0, 0);
-  sqlite3_exec(db, "PRAGMA journal_mode = WAL;", 0, 0, 0);
+  if( global_bRollback==0 ){
+    sqlite3_exec(db, "PRAGMA journal_mode = WAL;", 0, 0, 0);
+  }else{
+    sqlite3_exec(db, "PRAGMA journal_mode = DELETE;", 0, 0, 0);
+  }
   sqlite3_exec(db, "PRAGMA synchronous = OFF;", 0, 0, 0);
   sqlite3_exec(db, "PRAGMA count_changes = OFF;", 0, 0, 0);
 
@@ -207,6 +212,7 @@ int main(int argc, char *argv[]) {
       {10, "-customQuery",   1},
       {11, "-minThreads",    1},
       {12, "-numa",          0},
+      {13, "-rollback",      0},
     };
     for (int i = 1; i < argc; i++) {
         char *z = argv[i];
@@ -282,6 +288,9 @@ int main(int argc, char *argv[]) {
             cout << "numa_num_configured_cpus=" << numa_num_configured_cpus() << endl;
             cout << "numa_num_task_cpus=" << numa_num_task_cpus() << endl;
             cout << "numa_num_task_nodes=" << numa_num_task_nodes() << endl;
+            break;
+          case 13: assert( 0==sqlite3_strnicmp("-rollback", z, n) );
+            global_bRollback = 1;
             break;
         }
     }
