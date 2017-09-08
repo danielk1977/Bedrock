@@ -200,11 +200,11 @@ void test(int threadCount, const string& testQuery, int bConstant) {
     }
 
     std::sort(aEnd, &aEnd[threadCount]);
-    double avg = 0.0;
+    double sum = 0.0;
     for(int i=0; i<threadCount; i++){
-      avg += (aEnd[i] - start) / 1000000.0;
+      sum += (aEnd[i] - start) / 1000000.0;
     }
-    avg = avg / threadCount;
+    double avg = sum / threadCount;
 
     cout.precision(2);
     cout << fixed;
@@ -215,7 +215,11 @@ void test(int threadCount, const string& testQuery, int bConstant) {
 
     int i90 = threadCount*9/10;
     cout << i90 << "/" << threadCount << "=" << (aEnd[i90]-start)/1000000.0;
-    cout << ")" << endl << scientific;
+    cout.precision(0);
+    cout << ") qps=" << (numQueries * threadCount) / avg << " ";
+    cout << " qps/t=" << (numQueries * threadCount) / sum << " ";
+      
+    cout << endl << scientific;
 
     sqlite3_free(aEnd);
 }
