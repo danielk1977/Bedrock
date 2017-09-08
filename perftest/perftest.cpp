@@ -12,6 +12,7 @@
 #include <assert.h>
 #include <string.h>
 #include <numa.h>
+#include <algorithm>
 using namespace std;
 
 // Overall test settings
@@ -195,12 +196,23 @@ void test(int threadCount, const string& testQuery, int bConstant) {
         sqlite3_close(dbs[i]);
     }
 
-    cout.precision(2);
-    for (int i = 0; i < threadCount; i++) {
-      double tm = (aEnd[i] - start) / 1000000.0;
-      cout << fixed << tm << " ";
+    std::sort(aEnd, &aEnd[threadCount]);
+    double avg = 0.0;
+    for(int i=0; i<threadCount; i++){
+      avg += (aEnd[i] - start) / 1000000.0;
     }
-    cout << endl;
+    avg = avg / threadCount;
+
+    cout.precision(2);
+    cout << fixed;
+    cout << "best=" << (aEnd[0] - start) / 1000000.0 << " ";
+    cout << "worst=" << (aEnd[threadCount-1] - start) / 1000000.0 << " ";
+    cout << "median=" << (aEnd[threadCount/2] - start) / 1000000.0 << " ";
+    cout << "average=" << avg << " ";
+
+    int i90 = threadCount*9/10;
+    cout << i90 << "/" << threadCount << "=" << (aEnd[i90]-start)/1000000.0;
+    cout << endl << scientific;
 
     sqlite3_free(aEnd);
 }
